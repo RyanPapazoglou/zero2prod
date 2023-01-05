@@ -1,4 +1,5 @@
 use actix_web::rt::spawn;
+use std::collections::HashMap;
 use std::net::TcpListener;
 
 #[actix_web::test]
@@ -12,6 +13,50 @@ async fn test_health_check() {
         .expect("Failed to make request");
     assert!(res.status().is_success());
     assert_eq!(res.content_length(), Some(0));
+}
+
+#[actix_web::test]
+async fn test_new_subscriber_200() {
+    let address = spawn_app();
+    let client = reqwest::Client::new();
+    let mut data = HashMap::new();
+    data.insert("email", "test@email.com");
+    data.insert("name", "John Doe");
+
+    let res = client
+        .post(&format!("{}/subscriptions", &address))
+        .form(&data)
+        .send()
+        .await
+        .expect("Failed to execute request.");
+    assert!(res.status().is_success());
+}
+
+#[actix_web::test]
+async fn test_new_subscriber_400() {
+    let address = spawn_app();
+    let client = reqwest::Client::new();
+    let test_cases = vec![
+        ("name=Ryan%20Papazoglou", "missing the email"),
+        ("email=test%40email.com", "missing the name"),
+        ("", "missing the email and the name"),
+    ];
+
+    for (invalid_body, error_message) in test_cases {
+        let res = client
+            .post(&format!("{}/subscriptions", address))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(invalid_body)
+            .send()
+            .await
+            .expect("Failed to execute request.");
+        assert_eq!(
+            res.status().as_u16(),
+            400,
+            "The API did not fail with 400 Bad Request when the payload was {}",
+            error_message
+        )
+    }
 }
 
 fn spawn_app() -> String {
