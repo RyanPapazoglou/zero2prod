@@ -30,6 +30,7 @@ async fn test_new_subscriber_200() {
         .await
         .expect("Failed to execute request.");
     assert!(res.status().is_success());
+    assert_eq!(res.status().as_u16(), 200)
 }
 
 #[actix_web::test]

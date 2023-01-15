@@ -14,7 +14,7 @@ struct FormData {
 }
 
 async fn subscribe(form: web::Form<FormData>) -> HttpResponse {
-    format!("Welcome {}!", form.name);
+    format!("Welcome {}, with email {}!", form.name, form.email);
     HttpResponse::Ok().finish()
 }
 
