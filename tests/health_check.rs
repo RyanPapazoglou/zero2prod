@@ -1,17 +1,25 @@
 use actix_web::rt::spawn;
-use sqlx::{Connection, PgConnection};
+use actix_web::web::Data;
+use sqlx::types::uuid;
+use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::collections::HashMap;
 use std::net::TcpListener;
+use uuid::Uuid;
 
-use zero2prod::configuration::get_configuration;
+use zero2prod::configuration::{get_configuration, DatabaseSettings};
 use zero2prod::startup::run;
+
+pub struct TestApp {
+    pub address: String,
+    pub pool: PgPool,
+}
 
 #[actix_web::test]
 async fn test_health_check() {
-    let address = spawn_app();
+    let app = spawn_app().await;
     let client = reqwest::Client::new();
     let res = client
-        .get(&format!("{}/health_check", &address))
+        .get(&format!("{}/health_check", &app.address))
         .send()
         .await
         .expect("Failed to make request");
@@ -21,13 +29,9 @@ async fn test_health_check() {
 
 #[actix_web::test]
 async fn test_new_subscriber_200() {
-    let address = spawn_app();
-    let config = get_configuration().expect("Failed to load app config");
-    let conn_string = config.database.connection_string();
-    let mut conn = PgConnection::connect(&conn_string)
-        .await
-        .expect("Failed to connect to database");
+    let app = spawn_app().await;
     let client = reqwest::Client::new();
+
     let mut data = HashMap::new();
     let test_email = "test@email.com";
     let test_name = "John Doe";
@@ -35,7 +39,7 @@ async fn test_new_subscriber_200() {
     data.insert("name", test_name);
 
     let res = client
-        .post(&format!("{}/subscriptions", &address))
+        .post(&format!("{}/subscriptions", &app.address))
         .form(&data)
         .send()
         .await
@@ -43,16 +47,16 @@ async fn test_new_subscriber_200() {
     assert!(res.status().is_success());
 
     let new_sub = sqlx::query!("SELECT email, name FROM subscriptions",)
-        .fetch_one(&mut conn)
+        .fetch_one(&app.pool)
         .await
-        .expect("Failed to fetched saved subscription.");
+        .expect("Failed to fetch saved subscription.");
     assert_eq!(new_sub.name, test_name);
     assert_eq!(new_sub.email, test_email);
 }
 
 #[actix_web::test]
 async fn test_new_subscriber_400() {
-    let address = spawn_app();
+    let app = spawn_app().await;
     let client = reqwest::Client::new();
     let test_cases = vec![
         ("name=Ryan%20Papazoglou", "missing the email"),
@@ -62,7 +66,7 @@ async fn test_new_subscriber_400() {
 
     for (invalid_body, error_message) in test_cases {
         let res = client
-            .post(&format!("{}/subscriptions", address))
+            .post(&format!("{}/subscriptions", &app.address))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(invalid_body)
             .send()
@@ -77,10 +81,41 @@ async fn test_new_subscriber_400() {
     }
 }
 
-fn spawn_app() -> String {
+async fn spawn_app() -> TestApp {
     let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to a random port.");
     let port = listener.local_addr().unwrap().port();
-    let server = run(listener).expect("Failed to start server.");
+    let address = format!("http://127.0.0.1:{}", port);
+
+    let mut config = get_configuration().expect("Failed to load configuration");
+    config.database.database_name = Uuid::new_v4().to_string();
+    let conn_pool = configure_database(&config.database).await;
+    let server = run(listener, conn_pool.clone()).expect("Failed to start server.");
     let _ = spawn(server);
-    format!("http://127.0.0.1:{}", port)
+
+    TestApp {
+        address,
+        pool: conn_pool,
+    }
+}
+
+pub async fn configure_database(config: &DatabaseSettings) -> PgPool {
+    let mut connection = PgConnection::connect(&config.connection_string_without_db())
+        .await
+        .expect("Failed to connect to Postgres");
+
+    connection
+        .execute(format!(r#"CREATE DATABASE "{}";"#, config.database_name).as_str())
+        .await
+        .expect("Failed to create database");
+
+    let connection_pool = PgPool::connect(&config.connection_string())
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::migrate!("./migrations")
+        .run(&connection_pool)
+        .await
+        .expect("Failed to migrate the database");
+
+    return connection_pool;
 }
