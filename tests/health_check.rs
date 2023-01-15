@@ -1,7 +1,9 @@
 use actix_web::rt::spawn;
+use sqlx::{Connection, PgConnection};
 use std::collections::HashMap;
 use std::net::TcpListener;
 
+use zero2prod::configuration::get_configuration;
 use zero2prod::startup::run;
 
 #[actix_web::test]
@@ -20,10 +22,17 @@ async fn test_health_check() {
 #[actix_web::test]
 async fn test_new_subscriber_200() {
     let address = spawn_app();
+    let config = get_configuration().expect("Failed to load app config");
+    let conn_string = config.database.connection_string();
+    let mut conn = PgConnection::connect(&conn_string)
+        .await
+        .expect("Failed to connect to database");
     let client = reqwest::Client::new();
     let mut data = HashMap::new();
-    data.insert("email", "test@email.com");
-    data.insert("name", "John Doe");
+    let test_email = "test@email.com";
+    let test_name = "John Doe";
+    data.insert("email", test_email);
+    data.insert("name", test_name);
 
     let res = client
         .post(&format!("{}/subscriptions", &address))
@@ -32,7 +41,13 @@ async fn test_new_subscriber_200() {
         .await
         .expect("Failed to execute request.");
     assert!(res.status().is_success());
-    assert_eq!(res.status().as_u16(), 200)
+
+    let new_sub = sqlx::query!("SELECT email, name FROM subscriptions",)
+        .fetch_one(&mut conn)
+        .await
+        .expect("Failed to fetched saved subscription.");
+    assert_eq!(new_sub.name, test_name);
+    assert_eq!(new_sub.email, test_email);
 }
 
 #[actix_web::test]
