@@ -1,5 +1,4 @@
 use actix_web::rt::spawn;
-use actix_web::web::Data;
 use sqlx::types::uuid;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use std::collections::HashMap;
