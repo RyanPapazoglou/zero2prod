@@ -60,12 +60,10 @@ jobs:
             --features ${{ env.SQLX_FEATURES }}
             --no-default-features
             --locked
-
       - name: Migrate database
         run: |
           sudo apt-get install libpq-dev -y
           SKIP_DOCKER=true ./scripts/init_db.sh
-
       - name: Run cargo test
         uses: actions-rs/cargo@v1
         with:
@@ -98,9 +96,9 @@ jobs:
           POSTGRES_DB: postgres
         ports:
           - 5432:5432
-      env:
-        SQLX_VERSION: 0.6.2
-        SQLX_FEATURES: "rustls,postgres"
+    env:
+      SQLX_VERSION: 0.6.2
+      SQLX_FEATURES: "rustls,postgres"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
